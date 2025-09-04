@@ -4,7 +4,8 @@ WITH tb_transacoes AS (
            IdCliente,
            QtdePontos,
            datetime(substr(dtCriacao,1,19)) AS dtCriacao,
-           julianday('now') - julianday(substr(dtCriacao,1,10)) AS diffDate
+           julianday('now') - julianday(substr(dtCriacao,1,10)) AS diffDate,
+           CAST(strftime('%H', substr(dtCriacao,1,19)) AS INTEGER) AS dtHora
 
     FROM transacoes
 ),
@@ -94,6 +95,54 @@ tb_cliente_produto_rn AS (
 
 ),
 
+tb_cliente_dia AS (
+
+    SELECT idCliente,
+        strftime('%w', dtCriacao) AS dtDia,
+        count(*) AS qtdTransacao
+
+    FROM tb_transacoes
+    WHERE diffDate <= 28
+    GROUP BY idCliente, dtDia
+
+),
+
+tb_cliente_dia_rn AS (
+
+    SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY idCliente ORDER BY qtdTransacao DESC) as rnDia
+
+    FROM tb_cliente_dia
+
+),
+
+tb_cliente_periodo AS (
+
+    SELECT 
+        idCliente,
+        CASE
+                WHEN dtHora BETWEEN 7 AND 12 THEN 'MANHÃ'
+                WHEN dtHora BETWEEN 13 AND 18 THEN 'TARDE'
+                WHEN dtHora BETWEEN 19 AND 23 THEN 'NOITE'
+                ELSE 'MADRUGADA'
+            END AS periodo,
+            COUNT(*) AS qtdeTransacao
+
+    FROM tb_transacoes
+
+    GROUP BY 1,2
+
+)
+
+tb_cliente_periodo_rn AS (
+
+    SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY idCliente ORDER BY qtdeTransacao DESC) AS rnPeriodo
+
+    FROM tb_cliente_periodo
+
+),
+
 tb_join AS (
 
     SELECT t1.*,
@@ -102,7 +151,8 @@ tb_join AS (
            t4.DescProduto AS produto56,
            t5.DescProduto AS produto28,
            t6.DescProduto AS produto14,
-           t7.DescProduto AS produto7
+           t7.DescProduto AS produto7,
+           COALESCE(t8.dtDia, -1) AS dtDia
 
     FROM tb_sumario_transacoes AS t1
 
@@ -129,7 +179,12 @@ tb_join AS (
     ON t1.idCliente = t7.idCliente
     AND t7.rn7 = 1
 
-)
+    LEFT JOIN tb_cliente_dia_rn AS t8
+    ON t1.idCliente = t8.idCliente
+    AND t8.rnDia = 1
 
-SELECT * FROM tb_join
-ORDER BY idCliente
+    LEFT JOIN tb_cliente_periodo_rn AS t9
+    ON t1.idCliente = t9.idCliente
+    AND t8.rnPeriodo = 1
+
+),
